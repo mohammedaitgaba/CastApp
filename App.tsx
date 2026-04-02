@@ -27,7 +27,7 @@ import {
 import Paho from 'paho-mqtt';
 
 // TODO: Replace with your hosted receiver URL after publishing to GitHub Pages/Netlify
-const RECEIVER_BASE_URL = 'https://yourname.github.io/CastApp/receiver.html';
+const RECEIVER_BASE_URL = 'https://mohammedaitgaba.github.io/CastApp/receiver.html';
 
 
 // ── Sample Videos ──

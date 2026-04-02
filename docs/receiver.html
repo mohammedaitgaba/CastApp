@@ -93,7 +93,7 @@
     <div id="overlay">Connected to room <span id="roomLabel">----</span></div>
   </div>
 
-  <script src="https://unpkg.com/paho-mqtt@1.1.0/paho-mqtt.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.1.0/paho-mqtt.min.js"></script>
   <script>
     const roomInput = document.getElementById('roomInput');
     const connectBtn = document.getElementById('connectBtn');
@@ -167,6 +167,11 @@
     }
 
     function doConnect() {
+      if (typeof Paho === 'undefined' || !Paho.MQTT || !Paho.MQTT.Client) {
+        setStatus('Failed to load network library. Please refresh the page.', true);
+        return;
+      }
+
       const room = roomInput.value.trim();
       if (!room) {
         setStatus('Please enter a room code', true);
