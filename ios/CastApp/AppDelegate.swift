@@ -2,6 +2,7 @@ import UIKit
 import React
 import React_RCTAppDelegate
 import ReactAppDependencyProvider
+import GoogleCast
 
 @main
 class AppDelegate: UIResponder, UIApplicationDelegate {
@@ -28,6 +29,12 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
       in: window,
       launchOptions: launchOptions
     )
+
+    let receiverAppID = kGCKDefaultMediaReceiverApplicationID
+    let criteria = GCKDiscoveryCriteria(applicationID: receiverAppID)
+    let options = GCKCastOptions(discoveryCriteria: criteria)
+    options.startDiscoveryAfterFirstTapOnCastButton = true
+    GCKCastContext.setSharedInstanceWith(options)
 
     return true
   }

@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AuraCast Web Receiver</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%; height: 100%;
+      background: #0b0f19;
+      color: #f8fafc;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
+      overflow: hidden;
+    }
+    #setup {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 18px;
+      padding: 24px;
+      text-align: center;
+    }
+    h1 { font-size: 42px; letter-spacing: 1px; }
+    p { color: #94a3b8; font-size: 18px; max-width: 520px; line-height: 1.5; }
+    .room-input {
+      font-size: 28px;
+      padding: 14px 22px;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,0.12);
+      background: rgba(30,41,59,0.7);
+      color: #f8fafc;
+      width: 220px;
+      text-align: center;
+      outline: none;
+    }
+    .room-input::placeholder { color: #64748b; }
+    .btn {
+      font-size: 18px;
+      padding: 14px 32px;
+      border-radius: 14px;
+      border: none;
+      background: linear-gradient(135deg, #6366f1, #8b5cf6);
+      color: #fff;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .status {
+      margin-top: 8px;
+      font-size: 14px;
+      color: #64748b;
+    }
+    #player {
+      display: none;
+      position: absolute;
+      inset: 0;
+      background: #000;
+    }
+    video {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+    #overlay {
+      position: absolute;
+      top: 24px; left: 24px;
+      background: rgba(11,15,25,0.8);
+      padding: 12px 18px;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.08);
+      font-size: 14px;
+      color: #e2e8f0;
+      pointer-events: none;
+    }
+    #overlay span { color: #22c55e; font-weight: 700; }
+  </style>
+</head>
+<body>
+  <div id="setup">
+    <h1>📺 AuraCast Receiver</h1>
+    <p>Enter the Room Code shown on your phone to start casting.</p>
+    <input id="roomInput" class="room-input" type="text" placeholder="0000" maxlength="10" inputmode="numeric" />
+    <button id="connectBtn" class="btn">Connect</button>
+    <div id="status" class="status">Ready to connect</div>
+  </div>
+
+  <div id="player">
+    <video id="video" controls autoplay></video>
+    <div id="overlay">Connected to room <span id="roomLabel">----</span></div>
+  </div>
+
+  <script src="https://unpkg.com/paho-mqtt@1.1.0/paho-mqtt.js"></script>
+  <script>
+    const roomInput = document.getElementById('roomInput');
+    const connectBtn = document.getElementById('connectBtn');
+    const statusEl = document.getElementById('status');
+    const setupEl = document.getElementById('setup');
+    const playerEl = document.getElementById('player');
+    const videoEl = document.getElementById('video');
+    const roomLabel = document.getElementById('roomLabel');
+
+    let client = null;
+    const BROKER = 'broker.hivemq.com';
+    const PORT = 8000;
+
+    // Parse ?room=1234 from URL
+    const params = new URLSearchParams(window.location.search);
+    const autoRoom = params.get('room');
+    if (autoRoom) {
+      roomInput.value = autoRoom;
+    }
+
+    function setStatus(text, isError) {
+      statusEl.textContent = text;
+      statusEl.style.color = isError ? '#ef4444' : '#64748b';
+    }
+
+    let statusTimer = null;
+    let listenersAdded = false;
+
+    function publishStatus() {
+      if (!client || !client.isConnected()) return;
+      const payload = JSON.stringify({
+        action: 'status',
+        isPlaying: !videoEl.paused && !videoEl.ended,
+        currentTime: videoEl.currentTime || 0,
+        duration: videoEl.duration || 0,
+        ended: videoEl.ended,
+      });
+      const msg = new Paho.MQTT.Message(payload);
+      msg.destinationName = 'auracast/' + roomInput.value.trim() + '/status';
+      client.send(msg);
+    }
+
+    function onConnect(room) {
+      setStatus('Connected. Waiting for cast…');
+      roomLabel.textContent = room;
+      setupEl.style.display = 'none';
+      playerEl.style.display = 'block';
+      if (!listenersAdded) {
+        ['play', 'pause', 'seeked', 'ended', 'timeupdate'].forEach((evt) => {
+          videoEl.addEventListener(evt, publishStatus);
+        });
+        listenersAdded = true;
+      }
+      if (statusTimer) clearInterval(statusTimer);
+      statusTimer = setInterval(publishStatus, 2000);
+    }
+
+    function onFailure(err) {
+      setStatus('Connection failed: ' + (err.errorMessage || 'check network'), true);
+      connectBtn.disabled = false;
+    }
+
+    function onConnectionLost(resp) {
+      if (resp.errorCode !== 0) {
+        setStatus('Connection lost: ' + resp.errorMessage, true);
+        setupEl.style.display = 'flex';
+        playerEl.style.display = 'none';
+        connectBtn.disabled = false;
+        if (statusTimer) clearInterval(statusTimer);
+      }
+    }
+
+    function doConnect() {
+      const room = roomInput.value.trim();
+      if (!room) {
+        setStatus('Please enter a room code', true);
+        return;
+      }
+
+      connectBtn.disabled = true;
+      setStatus('Connecting…');
+
+      const clientId = 'auracast_tv_' + Math.random().toString(36).substr(2, 9);
+      client = new Paho.MQTT.Client(BROKER, PORT, clientId);
+      client.onMessageArrived = onMessage;
+      client.onConnectionLost = onConnectionLost;
+
+      client.connect({
+        onSuccess: () => {
+          client.subscribe('auracast/' + room + '/cmd');
+          onConnect(room);
+        },
+        onFailure: onFailure,
+        useSSL: false,
+      });
+    }
+
+    function onMessage(topic, payload) {
+      try {
+        const msg = JSON.parse(payload.payloadString || payload);
+        console.log('Command:', msg);
+
+        if (msg.action === 'load') {
+          videoEl.src = msg.url;
+          videoEl.load();
+          videoEl.play().catch(() => {});
+        }
+        if (msg.action === 'play') {
+          videoEl.play().catch(() => {});
+        }
+        if (msg.action === 'pause') {
+          videoEl.pause();
+        }
+        if (msg.action === 'stop') {
+          videoEl.pause();
+          videoEl.removeAttribute('src');
+          videoEl.load();
+        }
+        if (msg.action === 'seek' && typeof msg.time === 'number') {
+          videoEl.currentTime = Math.max(0, msg.time);
+        }
+      } catch (e) {
+        console.error('Invalid message', e);
+      }
+    }
+
+    connectBtn.addEventListener('click', doConnect);
+
+    // Allow Enter key to submit
+    roomInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') connectBtn.click();
+    });
+
+    // Auto-connect if room was provided in URL
+    if (autoRoom) {
+      doConnect();
+    }
+  </script>
+</body>
+</html>
